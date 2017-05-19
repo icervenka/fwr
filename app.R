@@ -1,5 +1,6 @@
 # FWR-VIS
 # TODO change computation of mean to normalize to hours
+# TODO include analysis of new format files (and general csv files with time - distance columns)
 # TODO implement night start
 
 library(shiny)
@@ -30,8 +31,8 @@ turns_time_string <- "Turns_Time"
 turns_data_string <- "Turns_Data"
 phase_name_vector <- c("Light", "Dark")
 to_distance_factor = round(pi * 22 / 100, digits = 3)
-night_start = 18
-night_duration = 12
+night_start_default = "18:00:00"
+night_duration = "12:00:00"
 sum_func <- c("sum", "mean", "max", "min")
 graph_height = 650
 cbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
@@ -70,11 +71,27 @@ agg_time <- function(x, init_crop, intervals, records_count) {
 # function that produces Dark/Light shading intervals in the back of the graph
 # input: initial amount of phases, number of intervals and amount of dark intervals in one phase
 # return: data frame with start/end of interval per row
-dark_plot_rect <- function(initial_phase_no, len, dark_intervals) {
+dark_plot_rect <- function(initial_phase_no, len, dark_intervals, start_phase) {
   st <- seq(from = initial_phase_no, to = len, by = 2*dark_intervals) - 0.5
   en <- seq(from = initial_phase_no + dark_intervals, to = len, by = 2*dark_intervals) - 0.5
+  
+  if(start_phase == "Dark") {
+    swap <- en
+    en <- st
+    st <- c(0, swap)
+    #en <- en - st[1]
+    #st <- st - st[1]
+  }
   min <- min(length(st), length(en))
-  return(data.frame(start = st[1:min], end = en[1:min]))
+  st <- st[1:min]
+  en <- en[1:min]
+  
+  if(en[length(en)] < len - dark_intervals) {
+    st <- c(st, st[length(st)] + 2*dark_intervals)
+    en <- c(en, len)
+  }
+  
+  return(data.frame(start = st, end = en))
 }
 
 # creates aesthetics for ggplot from dark_plot_rect
@@ -85,9 +102,19 @@ dark_rect_aes <- function(rects) {
 # vectorized function that takes list of chron time objects, and return a list of Light/Dark strings
 # based in night start and night duration parameters
 date_to_phase_arr <- function(x, night_start = night_start, night_duration = night_duration) {
-  x <- chron::hours(x)
-  night_end <- (night_start + night_duration) %% 24
-  return(ifelse(x >= night_start | x < night_end, "Dark", "Light"))
+  #x <- chron::hours(x)
+  x <- 24*60*60*as.numeric(times(x))
+  #night_end <- (night_start + night_duration) %% 24
+  
+  night_end = (as.numeric(as.difftime(c(night_start, "00:00:00"), unit = "secs")[1]) +
+                     as.numeric(as.difftime(c(night_duration, "00:00:00"), unit = "secs")[1])) %% (24*60*60)
+  night_start = 24*60*60*as.numeric(times(night_start))
+  
+  if(night_start <= (12*60*60)) {
+    return(ifelse(x >= night_start & x < night_end, "Dark", "Light"))
+  } else {
+    return(ifelse(x >= night_start | x < night_end, "Dark", "Light"))
+  }
 } 
 
 # function takes a list and returns number of occurences of first element until it changes
@@ -163,6 +190,7 @@ ui <- shinyUI(fluidPage(
         accept = c(".xls", ".xlsx", ".asc", ".csv")
       ),
       
+      textInput("night_start", label = "Night Start [hh:mm:ss]", value = "18:00:00"),
       
       # conditional panel to supply groups for mean calculations
       conditionalPanel(
@@ -245,12 +273,6 @@ server <- shinyServer(function(input, output) {
   })
   
   
-  # output$fileUploaded <- reactive({
-  #   return(!is.null(resultInput()))
-  # })
-  # 
-  # outputOptions(output, 'fileUploaded', suspendWhenHidden=FALSE)
-  
   output$download <- downloadHandler(
     
     # create name for file output
@@ -283,6 +305,14 @@ server <- shinyServer(function(input, output) {
     filename <- input$file1
     # extract extension from filename
     ext <- tools::file_ext(filename)[1]
+    
+    if (grepl("^([0-1][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])$", input$night_start)) {
+      night_start = input$night_start
+    } else {
+      night_start = night_start_default
+    }
+    
+    print(night_start)
     
     # if the file was not specified, load dummy data
     if(is.null(filename)) {
@@ -374,10 +404,18 @@ server <- shinyServer(function(input, output) {
     first_phase_change_dt <- tms[init_phase_count + 1]
     
     # prettify the first phase change time to whole minutes and seconds 
-    phase_change_time <- paste(night_start, "00", "00", sep = ":")
+    # phase_change_time <- paste(night_start, "00", "00", sep = ":")
+    phase_change_time <- night_start
     
     # prettify chron vector of times by subtracting the difference between actual time and prettified time
-    tms <- tms - as.character(first_phase_change_dt - phase_change_time)
+    
+    phase_change_diff = first_phase_change_dt - phase_change_time
+    
+#    if(phase_change_diff > 0) {
+#      tms <- tms - as.character(first_phase_change_dt - phase_change_time)
+#    } else {
+      tms <- tms - as.character(first_phase_change_dt)
+#    }
     
     # create chron datetime object
     date_time <- chron(dts, tms) 
@@ -422,6 +460,7 @@ server <- shinyServer(function(input, output) {
     
     # put Dark/Light phase into separate vector
     phase <- as.character(unname(unlist(result[1])))
+    start_phase = phase[1]
     
     # delete phase column from original data frame
     result[1] <- NULL
@@ -442,7 +481,7 @@ server <- shinyServer(function(input, output) {
   
     # create Dark/Light index intervals
     rect_start <- first_n_ocurrence(phase) + 1
-    rects <- dark_plot_rect(rect_start, dim(plot_data)[1], (12/globalValues$com_fact[indd]))
+    rects <- dark_plot_rect(rect_start, dim(plot_data)[1], (12/globalValues$com_fact[indd]), start_phase = start_phase)
 
     # plot graph
     graph_options <- c(graph_options, geom_line(size=0.75)) # specific graphing options
@@ -471,6 +510,7 @@ server <- shinyServer(function(input, output) {
     
     # put Dark/Light phase into separate vector
     phase <- as.character(unname(unlist(result[1])))
+    start_phase = phase[1]
     
     # delete phase column from original data frame
     result[1] <- NULL
@@ -521,7 +561,7 @@ server <- shinyServer(function(input, output) {
         
         # create Dark/Light index intervals
         rect_start <- first_n_ocurrence(phase) + 1
-        rects <- dark_plot_rect(rect_start, dim(plot_data)[1], (12/globalValues$com_fact[indd]))
+        rects <- dark_plot_rect(rect_start, dim(plot_data)[1], (12/globalValues$com_fact[indd]), start_phase = start_phase)
     
         # melt to long format based on id
         plot_df_melt <- melt(plot_df, id.vars = c("id"))
