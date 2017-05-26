@@ -1,10 +1,10 @@
 name: fwr_vis
+title:
 account: icervenka
 server: shinyapps.io
 appId: 124619
-bundleId: 577185
+bundleId: 841530
 url: https://icervenka.shinyapps.io/fwr_vis/
-when: 1475661760.51632
+when: 1495784569.52787
 asMultiple: FALSE
 asStatic: FALSE
-ignoredFiles: app_bak_2.R|app_bak.R|temp.R

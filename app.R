@@ -1,7 +1,6 @@
 # FWR-VIS
 # TODO change computation of mean to normalize to hours
 # TODO include analysis of new format files (and general csv files with time - distance columns)
-# TODO implement night start
 
 library(shiny)
 library(pryr)
@@ -287,9 +286,9 @@ server <- shinyServer(function(input, output) {
       
       # put data into individual sheets with one parameter per sheet and time aggregations side by side
       for (i in seq_along(result)) {
-        sheet <- createSheet(fwr_wb, sheetName = paste(i, "_hour_agg"))
+        sheet <- createSheet(fwr_wb, sheetName = paste0(globalValues$com_fact[[i]], "_hour_agg"))
         header_row <- data.frame(names(result[[i]]))
-        names(header_row) <- "date"
+        names(header_row) <- "interval"
         addDataFrame(t(header_row), sheet, col.names = FALSE, startRow = 1)
         addDataFrame(result[[i]], sheet, col.names = FALSE, startRow = 2)
       }
@@ -404,18 +403,11 @@ server <- shinyServer(function(input, output) {
     first_phase_change_dt <- tms[init_phase_count + 1]
     
     # prettify the first phase change time to whole minutes and seconds 
-    # phase_change_time <- paste(night_start, "00", "00", sep = ":")
     phase_change_time <- night_start
     
     # prettify chron vector of times by subtracting the difference between actual time and prettified time
-    
     phase_change_diff = first_phase_change_dt - phase_change_time
-    
-#    if(phase_change_diff > 0) {
-#      tms <- tms - as.character(first_phase_change_dt - phase_change_time)
-#    } else {
-      tms <- tms - as.character(first_phase_change_dt)
-#    }
+    tms <- tms - as.character(first_phase_change_dt)
     
     # create chron datetime object
     date_time <- chron(dts, tms) 
@@ -454,8 +446,6 @@ server <- shinyServer(function(input, output) {
   #-----------------------------------------------------------------------------------
   output$timePlot <- renderPlot({
     indd <- match(as.numeric(input$timeAggregation), globalValues$com_fact)
-    
-    
     result <- resultInput()[[indd]]
     
     # put Dark/Light phase into separate vector
@@ -505,7 +495,6 @@ server <- shinyServer(function(input, output) {
     # reactive object that is connected to update groups button
     input$update
 
-    
     result <- resultInput()[[indd]]
     
     # put Dark/Light phase into separate vector
