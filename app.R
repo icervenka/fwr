@@ -1,6 +1,10 @@
 # FWR-VIS
 # TODO change computation of mean to normalize to hours
 # TODO include analysis of new format files (and general csv files with time - distance columns)
+# TODO revamp hour plot for circadian changes
+# TODO add grouped hour plot
+# TODO hour plot should start from different hour (ask)
+# TODO adjust hour plot to real time by night start 
 
 library(shiny)
 library(pryr)
