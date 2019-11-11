@@ -1,10 +1,8 @@
-# TODO implement interval
-
-
 # imports ------------------------------------------------
 library(shiny)
 library(shinyWidgets)
 library(shinyTime)
+library(plotly)
 library(data.table)
 library(xlsx)
 library(rJava)
@@ -14,6 +12,7 @@ library(tidyverse)
 library(purrr)
 library(broom)
 library(ggplot2)
+library(gridExtra)
 library(numbers)
 library(reshape2)
 library(matrixStats)
@@ -25,15 +24,25 @@ options(shiny.maxRequestSize = 20*1024^2)
 options(java.parameters = "-Xmx2048m")
 
 # functions -----------------------------------------------
+find_interval = function(df, group_col, date_time_col, id_col) {
+  date_time_df = df %>% pivot_wider(names_from = {{group_col}}, values_from = {{date_time_col}}, id_cols = {{id_col}})
+  interval = map_dfr(date_time_df[-1], function(x) {diff(x)}) %>% 
+    pivot_longer(everything(), names_to = "subject", values_to = "interval") %>%
+    dplyr::select(interval) %>% 
+    unique %>%
+    pull
+  return(interval)
+}
+
 create_aggregation_vector = function(each, length) {
   vec = c(rep(1:length, each = each, length.out = length))
   return(vec)
 }
 
-aggregate_parameter = function(data, time, param) {
+aggregate_parameter = function(data, time, param, by) {
   setDT(data)[,.(light = first(light),
                  date_time = first(date_time),
-                 value = mean(get(param))),
+                 value = get(by)(get(param))),
               by = .(subject, interval = get(time))]
 }
 
@@ -66,6 +75,14 @@ min.mean.sd.max <- function(x) {
   r
 }
 
+mean.sd <- function(x) {
+  r <- c(mean(x) - sd(x), mean(x), mean(x) + sd(x))
+  names(r) <- c("ymin", "y", "ymax")
+  r
+}
+
+# additional ploting options ---------------------------------
+
 plot_points = function(condition_field, aes_colour = subject) {
   if("1" %in% condition_field) {
     geom_point(aes(colour = {{ aes_colour }} ))
@@ -76,7 +93,7 @@ plot_points = function(condition_field, aes_colour = subject) {
 
 plot_errorbars = function(condition_field, aes_fill = group) {
   if(condition_field == "2") {
-    geom_ribbon(aes(ymin=mean-sd, ymax=mean+sd, fill = {{ aes_fill }}), alpha = 0.08)
+    geom_ribbon(aes(ymin=mean-sd, ymax=mean+sd, fill = {{ aes_fill }}), alpha = 0.15)
   } else {
     geom_blank()
   }
@@ -104,25 +121,26 @@ server <- function(input, output, session) {
   theme_set(theme_bw(base_size = 18))
   global_vars = reactiveValues()
   
-  observe({
-    night_start = input$night_start
-    night_end = input$night_end
-  })
-  
   source("read_input_server.R", local = TRUE)
   
   source("sidebar_items_server.R", local = TRUE)
   
   source("individual_plot_server.R", local = TRUE)
   
-  # source("grouped_plot_server.R", local = TRUE)
-  # 
-  # source("daily_individual_plot_server.R", local = TRUE)
-  # 
-  # source("daily_grouped_plot_server.R", local = TRUE)
-  # 
-  # source("hour_plot_server.R", local = TRUE)
-  # 
-  # source("download_server.R", local = TRUE)
+  source("daily_individual_plot_server.R", local = TRUE)
+  
+  source("bout_individual_plot_server.R", local = TRUE)
+  
+  source("hour_individual_plot_server.R", local = TRUE)
+  
+  source("grouped_plot_server.R", local = TRUE)
+  
+  source("daily_grouped_plot_server.R", local = TRUE)
+  
+  source("bout_grouped_plot_server.R", local = TRUE)
+
+  source("hour_grouped_plot_server.R", local = TRUE)
+
+  source("download_server.R", local = TRUE)
   
 }

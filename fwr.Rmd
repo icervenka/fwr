@@ -1,0 +1,404 @@
+---
+title: "FWR-VIS"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: bootstrap
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+# imports ------------------------------------------------
+library(shiny)
+library(shinyWidgets)
+library(shinyTime)
+library(plotly)
+library(data.table)
+library(xlsx)
+library(rJava)
+library(stringr)
+library(readr)
+library(tidyverse)
+library(purrr)
+library(broom)
+library(ggplot2)
+library(gridExtra)
+library(numbers)
+library(reshape2)
+library(matrixStats)
+library(lubridate)
+library(dplyr)
+
+# options ------------------------------------------------
+options(shiny.maxRequestSize = 20*1024^2)
+options(java.parameters = "-Xmx2048m")
+
+global_vars = reactiveValues()
+
+# functions -----------------------------------------------
+find_interval = function(df, group_col, date_time_col, id_col) {
+  date_time_df = df %>% pivot_wider(names_from = {{group_col}}, values_from = {{date_time_col}}, id_cols = {{id_col}})
+  interval = map_dfr(date_time_df[-1], function(x) {diff(x)}) %>% 
+    pivot_longer(everything(), names_to = "subject", values_to = "interval") %>%
+    dplyr::select(interval) %>% 
+    unique %>%
+    pull
+  return(interval)
+}
+
+create_aggregation_vector = function(each, length) {
+  vec = c(rep(1:length, each = each, length.out = length))
+  return(vec)
+}
+
+aggregate_parameter = function(data, time, param, by) {
+  setDT(data)[,.(light = first(light),
+                 date_time = first(date_time),
+                 value = get(by)(get(param))),
+              by = .(subject, interval = get(time))]
+}
+
+parse_group_inputs = function(inp) {
+  
+  group_list = lapply(1:as.integer(inp$select_no_groups), function(x) {
+    inp[[paste0("group_no_", x)]]
+  })
+  
+  group_list[sapply(group_list, is.null)] <- list("")
+  group_list <- group_list[group_list != ""]
+  
+  group_list <- rapply(lapply(group_list, strsplit, ","), str_trim, how = "list") %>%
+    lapply(unlist)
+  
+  if(length(group_list) > 0) {
+    group_df = map_dfr(1:length(group_list), function(x) {
+      cbind.data.frame(subject = group_list[[x]], group =  paste0("Group", x), stringsAsFactors = FALSE)
+    })
+  } else {
+    group_df = data.frame()
+  }
+  
+  return(group_df)
+}
+
+min.mean.sd.max <- function(x) {
+  r <- c(min(x), mean(x) - sd(x), mean(x), mean(x) + sd(x), max(x))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+
+# additional ploting options ---------------------------------
+
+plot_points = function(condition_field, aes_colour = subject) {
+  if("1" %in% condition_field) {
+    geom_point(aes(colour = {{ aes_colour }} ))
+  } else {
+    geom_blank()
+  }
+}
+
+plot_errorbars = function(condition_field, aes_fill = group) {
+  if(condition_field == "2") {
+    geom_ribbon(aes(ymin=mean-sd, ymax=mean+sd, fill = {{ aes_fill }}), alpha = 0.15)
+  } else {
+    geom_blank()
+  }
+}
+
+plot_facets = function(n, formula = "param ~ ." ) {
+  if(n > 1) {
+    facet_grid(as.formula(formula) ,scales = "free_y", labeller = label_both)
+  } else {
+    geom_blank()
+  }
+}
+
+plot_jitter = function(condition_field) {
+  if("1" %in% condition_field) {
+    geom_jitter(shape = 21, colour = "black", fill = "white", size = 3, width = 0.25)
+  } else {
+    geom_blank()
+  }
+}
+
+# file <- input$file1
+#   ext <- tools::file_ext(file)[1]
+# 
+#   # if file is not uploaded provide temp file to show results
+#   if(is.null(file)) {
+    file <- read_delim("2019-11-01_zierath_fwr_convert.csv", delim = ',',col_types = "ccd")
+  # } else if(toupper(ext) == "CSV") {
+  #   file.rename(file$datapath,
+  #               paste(file$datapath, ext, sep="."))
+  #   file <- read_delim(paste(file$datapath, ext, sep="."), delim = ',',col_types = "ccd")
+  # }
+
+  night_start = "18:00:00"
+  night_end = "06:00:00"
+
+  data = file
+  names(data) = c("subject", "date_time", "distance")
+  subject_list = unique(data$subject)
+  
+  data$date_time = ymd_hms(data$date_time)
+  #data = data %>% mutate(light = ifelse(hms::as_hms(date_time) < hms::as_hms(night_start) & hms::as_hms(date_time) > hms::as_hms(night_end), 1, 0))
+  data = data %>% mutate(light = ifelse(hms::as_hms(date_time) < hms::as_hms(night_start) & hms::as_hms(date_time) > hms::as_hms(night_end), 1, 0))
+  data = data %>% filter(subject != "Mouse_12") %>% group_by(subject) %>% mutate(interval = 1:n())
+  data = data %>% group_by(subject) %>% mutate(interval = row_number())
+  
+  interval = find_interval(data, subject, date_time, interval)
+  if(length(interval) != 1) {
+    stop("One of subject time series is not regular. Please update your data and try again")
+  } else {
+    interval = as.numeric(interval)
+  }
+  
+  time_aggregation_values = intersect(seq(interval, 24*60, by = interval), 
+                                      c(divisors(12*60)[-1], 1440))
+  time_aggregation_repeats = time_aggregation_values / interval
+  
+  
+  data_subject = data %>% dplyr::group_by(subject) %>% nest()
+  data_subject = data_subject %>% 
+    mutate(first_night_interval = map(data, . %>% dplyr::filter(light == 0) %>% top_n(1, -interval) %>% dplyr::select(interval) %>% as.numeric),
+           no_records = map(data, . %>% dplyr::count() %>% as.numeric),
+           cropped_records = map2_dbl(.x = data, .y = first_night_interval, function(x, y) {(x %>% dplyr::count() %>% as.numeric) + 1 - y}))
+  
+  
+  min_records = min(data_subject$cropped_records)
+  
+  data_subject = data_subject %>%
+    mutate(cropped = modify2(data, first_night_interval, function(x, y, mm) {
+      x %>% dplyr::filter(interval >= y & interval <= (mm + y))
+    }, mm = min_records))
+  
+  aggdf = map_dfc(time_aggregation_repeats, .f = create_aggregation_vector, data_subject$cropped_records[[1]])
+  names(aggdf) = paste0("t",time_aggregation_values)
+  
+  data_long = data_subject %>% select(subject, cropped) %>% unnest(cropped)
+  data_agg = cbind.data.frame(data_long, aggdf)
+  
+  global_vars$data_agg = data_agg
+  global_vars$subject_list = subject_list
+  global_vars$time_aggregation_values = time_aggregation_values
+  global_vars$time_aggregation_repeats = time_aggregation_repeats
+```
+
+Series Individual
+===================================== 
+
+Column {.sidebar data-width=350}
+-----------------------------------------------------------------------
+
+
+```{r}
+renderUI({
+  fileInput("file1", "Upload your file")
+})
+
+renderUI({
+  timeInput("night_start", "Night start", value = strptime("18:00:00", "%T"))
+})
+
+renderUI({
+  timeInput("night_end", "Night end", value = strptime("06:00:00", "%T"))
+})
+
+renderUI({
+  shinyWidgets::sliderTextInput("select_aggregation", "Select aggregation [min]",
+                                choices = global_vars$time_aggregation_values %>% as.character, selected = "60")
+})
+
+renderUI({
+  radioButtons("aggregate_by", label = "Aggregate by",
+               choices = list("Mean" = "mean", "Sum" = "sum"), 
+               selected = "mean")
+})
+
+renderUI({
+  sliderInput("display_interval", label = "Display intervals", min = 1, 
+              max = global_vars$max_display_interval, value = c(0, global_vars$max_display_interval), step = 1)
+})
+
+renderUI({
+  radioButtons("select_cumulative", label = "Plot",
+               choices = list("Interval data" = 1, "Cumulative data" = 2), 
+               selected = 1)
+})
+
+renderUI({
+  # Create the checkboxes and select them all by default
+  pickerInput(
+    inputId = "select_subjects", 
+    label = "Select subjects", 
+    choices = global_vars$subject_list, 
+    selected = global_vars$subject_list[1:2],
+    options = list(
+      `actions-box` = TRUE, 
+      size = 15,
+      `selected-text-format` = "count > 4"
+    ), 
+    multiple = TRUE
+  )
+})
+
+renderUI({
+  sliderInput("shift_zt", label = "Shift Zeitgeber 0 to:", min = 0, 
+              max = 23, value = 6, step = 1)
+})
+
+renderUI({
+  # Create the checkboxes and select them all by default
+  numericInput("select_no_groups", label = "Select number of groups", value = 1, min = 1, max = length(global_vars$subject_list)/2)
+})
+
+renderUI({
+  # Create the checkboxes and select them all by default
+  if(is.integer(input$select_no_groups)) {
+    map(1:as.integer(input$select_no_groups), function(i) {
+      isolate(
+        pickerInput(
+          inputId = paste0("group_no_", i), 
+          label = paste0("Group: ", i), 
+          choices = global_vars$subject_list, 
+          selected = input[[paste0("group_no_", as.character(i))]],
+          options = list(
+            `actions-box` = TRUE, 
+            size = 15,
+            `selected-text-format` = "count > 4"
+          ), 
+          multiple = TRUE
+        )
+      )
+    })
+  }
+})
+
+renderUI({
+  # Create the checkboxes and select them all by default
+  checkboxGroupInput("display_points", "Display additional", 
+                     choices  = c("Display points" = 1))
+})
+
+renderUI({
+  # Create the checkboxes and select them all by default
+  radioButtons("display_errorbars", "Display error bars",
+               choices  = c("none" = 1, "SD" = 2),
+               selected = 1)
+})
+
+renderUI({
+  radioButtons("display_statistics", label = "Display statistics",
+               choices = list("none" = 1, "p-values" = 2, "adjusted p-values (BH)" = 3), 
+               selected = 1)
+})
+
+renderUI({
+  pickerInput(
+    inputId = "select_dark", 
+    label = "Include dark intervals", 
+    choices = global_vars$dark_intervals,
+    selected = global_vars$dark_intervals, 
+    options = list(
+      `actions-box` = TRUE, 
+      size = 15,
+      `selected-text-format` = "count > 15"
+    ), 
+    multiple = TRUE
+  )
+})
+
+renderUI({
+  pickerInput(
+    inputId = "select_light", 
+    label = "Include light intervals", 
+    choices = global_vars$light_intervals, 
+    selected = global_vars$light_intervals, 
+    options = list(
+      `actions-box` = TRUE, 
+      size = 15,
+      `selected-text-format` = "count > 15"
+    ), 
+    multiple = TRUE
+  )
+})
+
+renderUI({
+  downloadButton("download_current_view", label = "Download this view as csv", icon = icon("download"))
+})
+
+downloadHandler(
+  filename = "daily_view.csv",
+  content = function(file) {
+    data = global_vars$output_df
+    write.csv(data, file)
+  }
+)
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Geyser Eruption Duration
+
+```{r}
+renderPlotly({
+
+  aggregated_df = aggregate_parameter(global_vars$data_agg, 
+                                      paste0("t", input$select_aggregation), 
+                                      "distance",
+                                      input$aggregate_by)
+  split_aggregated_df = aggregated_df %>% group_by(subject, light) %>% mutate(split_interval = row_number())
+  
+  global_vars$max_display_interval = max(aggregated_df$interval)
+  
+  aggregated_df %>%
+    dplyr::filter(subject %in% input$select_subjects) %>%
+    dplyr::filter(interval >= input$display_interval[1] & interval <= input$display_interval[2]) %>%
+    
+    plot_ly(x = ~interval, y = ~value, type = 'scatter', mode = 'lines', color = ~ subject, name = ~ subject)
+    # ggplot(aes(x = interval, y = value, color = subject)) + 
+    # geom_tile(data = . %>% filter(subject == input$select_subjects[1]) %>% filter(light != 1),
+    #           aes(x = (!light)*interval, y = 0 , width = 1, height = Inf),
+    #           fill = "grey50", alpha = 0.2, inherit.aes = F) +
+    # geom_line() + 
+    # plot_points(input$display_points) + 
+    # labs(y = "Distance [m]")
+  
+  # p2 = split_aggregated_df %>%
+  #   dplyr::filter(subject %in% input$select_subjects) %>%
+  #   dplyr::filter(interval >= input$display_interval[1] & interval <= input$display_interval[2]) %>%
+  #   ggplot(aes(x = split_interval, y = value, color = subject)) + 
+  #   geom_line() + 
+  #   plot_points(input$display_points) + 
+  #   plot_facets(2, formula = "~light") +
+  #   labs(y = "Distance [m]")
+    
+    #grid.arrange(p1, p2, ncol = 1)
+})
+
+```
+
+
+Daily Individual
+===================================== 
+
+
+Hour Individual
+===================================== 
+
+
+Series Grouped
+===================================== 
+
+
+Daily Grouped
+===================================== 
+
+
+Hour Grouped
+===================================== 
+
+
