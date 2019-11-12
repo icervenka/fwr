@@ -32,5 +32,17 @@ output$individual_plot <- renderPlot({
 })
 
 output$individual_plot_render <- renderUI({
-  plotOutput("individual_plot", height = input$plot_height*2, width = input$plot_width)
+  if(is.null(input$plot_height)) {
+    input_height = 500
+  } else {
+    input_height = input$plot_height
+  }
+  
+  if(is.null(input$plot_width)) {
+    input_width = 750
+  } else {
+    input_width = input$plot_width
+  }
+  
+  plotOutput("individual_plot", height = input_height, width = input_width)
 })

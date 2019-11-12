@@ -1,0 +1,13 @@
+name: fwr_vis2
+title: fwr_vis2
+username:
+account: icervenka
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1454346
+bundleId: 2580724
+url: https://icervenka.shinyapps.io/fwr_vis2/
+when: 1573494412.25753
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .RData|fwr.Rmd

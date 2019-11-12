@@ -122,25 +122,25 @@ server <- function(input, output, session) {
   global_vars = reactiveValues()
   
   source("read_input_server.R", local = TRUE)
-  
+
   source("sidebar_items_server.R", local = TRUE)
-  
+
   source("individual_plot_server.R", local = TRUE)
-  
+
   source("daily_individual_plot_server.R", local = TRUE)
-  
+
   source("bout_individual_plot_server.R", local = TRUE)
-  
+
   source("hour_individual_plot_server.R", local = TRUE)
-  
+
   source("grouped_plot_server.R", local = TRUE)
-  
+
   source("daily_grouped_plot_server.R", local = TRUE)
-  
+
   source("bout_grouped_plot_server.R", local = TRUE)
 
   source("hour_grouped_plot_server.R", local = TRUE)
 
   source("download_server.R", local = TRUE)
-  
+
 }
