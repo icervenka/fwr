@@ -22,7 +22,7 @@ readInput = observe({
   data$date_time = ymd_hms(data$date_time)
   #data = data %>% mutate(light = ifelse(hms::as_hms(date_time) < hms::as_hms(night_start) & hms::as_hms(date_time) > hms::as_hms(night_end), 1, 0))
   data = data %>% mutate(light = ifelse(hms::as_hms(date_time) < hms::as_hms(night_start) & hms::as_hms(date_time) > hms::as_hms(night_end), 1, 0))
-  data = data %>% filter(subject != "Mouse_12") %>% group_by(subject) %>% mutate(interval = 1:n())
+  #data = data %>% filter(subject != "Mouse_12") %>% group_by(subject) %>% mutate(interval = 1:n())
   data = data %>% group_by(subject) %>% mutate(interval = row_number())
   
   interval = find_interval(data, subject, date_time, interval)

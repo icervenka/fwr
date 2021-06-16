@@ -2,7 +2,6 @@
 library(shiny)
 library(shinyWidgets)
 library(shinyTime)
-library(plotly)
 library(data.table)
 library(xlsx)
 library(rJava)

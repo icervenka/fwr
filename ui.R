@@ -1,21 +1,6 @@
 ui <- fluidPage(
   titlePanel("FWR-VIS"),
   
-  # tags$head(
-  #   tags$style(
-  #     HTML(
-  #       ".checkbox-inline { 
-  #                   margin-left: 0px;
-  #                   margin-right: 30px;
-  #         }
-  #        .checkbox-inline+.checkbox-inline {
-  #                   margin-left: 0px;
-  #                   margin-right: 30px;
-  #         }"
-  #     )
-  #   ) 
-  # ),
-  
   tags$style(type="text/css",
              ".shiny-output-error { visibility: hidden; }",
              ".shiny-output-error:before { visibility: hidden; }"),
